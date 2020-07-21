@@ -756,10 +756,11 @@ contract('WordSale', ([buyer, seller, userNotAuthorized]) => {
   });
 
   it('should let seller send the words in phase LITIGIOUS_MODE', async function () {
-    // TODO FAZ ISSO
+    // TODO COMPLETE THIS
   });
 
   it('should not let seller send the words in phase LITIGIOUS_MODE after timeout', async function () {
-    // TODO AQUI TBM
+    // TODO COMPLETE THIS
   });
 });
+
