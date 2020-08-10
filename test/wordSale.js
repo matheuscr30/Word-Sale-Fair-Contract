@@ -3,7 +3,7 @@ const { increaseTime, increaseTimeTo, duration } = require('./helpers/increaseTi
 const { advanceBlock } = require('./helpers/advanceToBlock');
 const { latestTime } = require('./helpers/latestTime');
 const { EVMRevert } = require('./helpers/EVMRevert');
-const { calculateBloomFilter } = require('./helpers/bloomFilter');
+const { BloomFilter, convertStrToNumber } = require('./helpers/bloomFilter');
 
 require('chai')
   .use(require('chai-as-promised'))
@@ -34,8 +34,18 @@ contract('WordSale', ([buyer, seller, userNotAuthorized]) => {
     SALE_LOCKED: 9
   };
 
-  const BLOOM_FILTER_SELLER = 24;
-  const BLOOM_FILTER_BUYER = 40;
+  const NUMBER_OF_HASHES = 3;
+  const WORDS_BUYER = ['hey', 'hello', 'no way', 'programming'];
+  const WORDS_SELLER = ['i', 'dont', 'know'];
+
+  let bfBuyer = new BloomFilter(256, 3);
+  bfBuyer.add(WORDS_BUYER);
+
+  let bfSeller = new BloomFilter(256, 3);
+  bfSeller.add(WORDS_SELLER);
+
+  const BLOOM_FILTER_BUYER = bfBuyer.bloomFilter;
+  const BLOOM_FILTER_SELLER = bfSeller.bloomFilter;
   const COLLATERAL = 1000;
   const PENALTY = 2000;
   const FACTOR = 30;
@@ -48,7 +58,8 @@ contract('WordSale', ([buyer, seller, userNotAuthorized]) => {
   beforeEach(async function () {
     this.contract = await WordSale.new(
       seller,
-      TIMEOUT_DURATION
+      TIMEOUT_DURATION,
+      NUMBER_OF_HASHES
     );
   });
 
@@ -755,12 +766,151 @@ contract('WordSale', ([buyer, seller, userNotAuthorized]) => {
     SALE_STATE.BUYER_CONFIRM_SALE.should.eq.BN(await this.contract.state());
   });
 
-  it('should let seller send the words in phase LITIGIOUS_MODE', async function () {
-    // TODO COMPLETE THIS
+  it('should let seller withdraw his amount when he send the correct words in phase LITIGIOUS_MODE', async function () {
+    await this.contract.commitCollateral({
+      from: buyer,
+      value: COLLATERAL
+    });
+
+    await this.contract.commitCollateral({
+      from: seller,
+      value: COLLATERAL
+    });
+
+    await this.contract.sendBloomFilter(BLOOM_FILTER_BUYER, {
+      from: buyer
+    });
+
+    await this.contract.sendBloomFilter(BLOOM_FILTER_SELLER, {
+      from: seller
+    });
+
+    await this.contract.withdraw({
+      from: buyer
+    });
+
+    await this.contract.withdraw({
+      from: seller
+    });
+
+    await this.contract.startSale(PENALTY, FACTOR, {
+      from: buyer,
+      value: COLLATERAL
+    });
+
+    await this.contract.deposit({
+      from: seller,
+      value: PENALTY
+    });
+
+    await this.contract.refuseSale({
+      from: buyer
+    });
+
+    let words = WORDS_SELLER.map(w => convertStrToNumber(w));
+    let { logs } = await this.contract.sendWords(words, {
+      from: seller
+    });
+
+    expectEvent.inLogs(logs, 'LitigiousResult', {
+      sellerHonesty: true,
+      bloomFilterRegistered: BLOOM_FILTER_SELLER,
+      bloomFilterBuilt: BLOOM_FILTER_SELLER
+    });
+
+    SALE_STATE.SALE_LOCKED.should.eq.BN(await this.contract.state());
+
+    let factorAmount = (PENALTY * FACTOR) / 100;
+    let penaltyAmount = PENALTY - factorAmount;
+    let awaitedWithdrawAmount = COLLATERAL + penaltyAmount;
+
+    let expectedBalance = (await balance.current(seller)).add(BN(awaitedWithdrawAmount));
+
+    let { receipt, logs: logsWithdraw } = await this.contract.withdraw({
+      from: seller
+    });
+    (await balance.current(seller)).should.eq.BN(expectedBalance.sub(await computeCost(receipt)));
+
+    expectEvent.inLogs(logsWithdraw, 'Withdraw', {
+      participant: seller,
+      value: BN(awaitedWithdrawAmount)
+    });
   });
 
-  it('should not let seller send the words in phase LITIGIOUS_MODE after timeout', async function () {
-    // TODO COMPLETE THIS
+  it('should not seller withdraw his amount when he send the wrong words in phase LITIGIOUS_MODE', async function () {
+    await this.contract.commitCollateral({
+      from: buyer,
+      value: COLLATERAL
+    });
+
+    await this.contract.commitCollateral({
+      from: seller,
+      value: COLLATERAL
+    });
+
+    await this.contract.sendBloomFilter(BLOOM_FILTER_BUYER, {
+      from: buyer
+    });
+
+    await this.contract.sendBloomFilter(BLOOM_FILTER_SELLER, {
+      from: seller
+    });
+
+    await this.contract.withdraw({
+      from: buyer
+    });
+
+    await this.contract.withdraw({
+      from: seller
+    });
+
+    await this.contract.startSale(PENALTY, FACTOR, {
+      from: buyer,
+      value: COLLATERAL
+    });
+
+    await this.contract.deposit({
+      from: seller,
+      value: PENALTY
+    });
+
+    await this.contract.refuseSale({
+      from: buyer
+    });
+
+    let wrongWords = [...WORDS_SELLER, 'wrong', 'words'];
+    let words = wrongWords.map(w => convertStrToNumber(w));
+    let { logs } = await this.contract.sendWords(words, {
+      from: seller
+    });
+
+    let bfWrong = new BloomFilter(256, 3);
+    bfWrong.add(wrongWords);
+
+    expectEvent.inLogs(logs, 'LitigiousResult', {
+      sellerHonesty: false,
+      bloomFilterRegistered: BLOOM_FILTER_SELLER,
+      bloomFilterBuilt: bfWrong.bloomFilter
+    });
+
+    SALE_STATE.SALE_LOCKED.should.eq.BN(await this.contract.state());
+
+    await this.contract.withdraw({
+      from: seller
+    }).should.be.rejectedWith(EVMRevert);
+
+    let awaitedWithdrawAmount = COLLATERAL + PENALTY;
+    let expectedBalance = (await balance.current(buyer)).add(BN(awaitedWithdrawAmount));
+
+    let { receipt, logs: logsWithdraw } = await this.contract.withdraw({
+      from: buyer
+    });
+
+    (await balance.current(buyer)).should.eq.BN(expectedBalance.sub(await computeCost(receipt)));
+
+    expectEvent.inLogs(logsWithdraw, 'Withdraw', {
+      participant: buyer,
+      value: BN(awaitedWithdrawAmount)
+    });
   });
 });
-

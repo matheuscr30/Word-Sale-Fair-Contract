@@ -1,39 +1,61 @@
-const BigNumber = require('bignumber.js');
-const SIZE = 256;
+const BN = (arg) => new web3.utils.BN(arg);
+const soliditySha3 = web3.utils.soliditySha3;
 
-function calculateBloomFilter (number_of_hashes, words) {
-  let bloomFilter = 0;
+class BloomFilter {
+  constructor(size, numberOfHashes) {
+    this.size = size;
+    this.numberOfHashes = numberOfHashes;
+    this.bloomFilter = BN(0);
+  }
 
-  for (let word of words) {
-    console.log(word);
-    for (let i = 1; i <= number_of_hashes; i++) {
-      let data = i.toString() + word;
-      let res = BigNumber(hash(data));
-      console.log(res.toString());
+  add(words) {
+    for (let word of words) {
+      let wordNum = convertStrToNumber(word);
 
-      console.log(SIZE);
-      let t = res.modulo(100000)
-      console.log(t.toString())
-      console.log(t);
-      let mask = 1 << t;
-      console.log(`Hash ${i} / Mask ${mask}`);
-      bloomFilter |= mask;
-      console.log(`Bloom Filter ${bloomFilter}`);
+      for (let i = 1; i <= this.numberOfHashes; i++) {
+        let bytes = soliditySha3(wordNum, i);
+        let res = web3.utils.toBN(bytes);
+        let bitPos = res.mod(BN(this.size));
+
+        let mask = BN(0);
+        mask = mask.bincn(bitPos.toNumber());
+
+        this.bloomFilter = this.bloomFilter.or(BN(mask));
+      }
     }
   }
-  return bloomFilter;
+
+  verify(word) {
+    let wordNum = convertStrToNumber(word);
+
+    for (let i = 1; i <= this.numberOfHashes; i++) {
+      let bytes = soliditySha3(wordNum, i);
+      let res = web3.utils.toBN(bytes);
+      let bitPos = res.mod(BN(this.size));
+
+      let mask = BN(0);
+      mask = mask.bincn(bitPos.toNumber());
+
+      if (!this.bloomFilter.eq(this.bloomFilter.or(BN(mask))))
+        return false;
+    }
+    return true;
+  }
 }
 
-function hash(data) {
-  let hash_ = require('crypto').createHash('sha256')
+const convertStrToNumber = word => {
+  return word.split().reduce((sum, reduce) => {
+    return sum + word.charCodeAt(0)
+  }, 0);
+};
+
+const hash = data => {
+  let _hash = require('crypto').createHash('sha256')
     .update(data).digest('hex');
-  console.log("hash")
-  console.log(hash_);
-  console.log(hash_ % 256)
-  console.log("terminou")
-  return parseInt(hash_, 16);
-}
+  return _hash;
+};
 
 module.exports = {
-  calculateBloomFilter
+  BloomFilter,
+  convertStrToNumber
 };

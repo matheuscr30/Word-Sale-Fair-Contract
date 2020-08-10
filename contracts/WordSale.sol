@@ -13,7 +13,8 @@ contract WordSale {
     event SaleAccepted(address indexed buyer);
     event SaleRefused(address indexed buyer);
     event Withdraw(address indexed participant, uint value);
-    event SellerSentWords();
+    event LitigiousResult(bool sellerHonesty, uint bloomFilterRegistered, uint bloomFilterBuilt);
+    event Refund(uint refund);
 
     enum SaleState {
         BUYER_COMMIT,
@@ -34,6 +35,8 @@ contract WordSale {
     address public seller;
     address public buyer;
 
+    uint numberOfHashes;
+
     uint bloomFilterSeller;
     uint bloomFilterBuyer;
     uint collateralBuyer;
@@ -43,17 +46,19 @@ contract WordSale {
     uint factor;
 
     uint timeoutDuration;
-    uint endTimeState;
+    uint public endTimeState;
 
     SaleState public state;
 
     constructor(
         address _seller,
-        uint _timeoutDuration
+        uint _timeoutDuration,
+        uint _numberOfHashes
     ) public {
         buyer = msg.sender;
         seller = _seller;
         timeoutDuration = _timeoutDuration;
+        numberOfHashes = _numberOfHashes;
 
         withdraws[buyer] = 0;
         withdraws[seller] = 0;
@@ -163,25 +168,36 @@ contract WordSale {
         emit SaleRefused(msg.sender);
     }
 
-    function sendWords(bytes32[] memory word) public onlySeller onlyIfNotExpired {
+    function sendWords(uint[] memory words) public onlySeller onlyIfNotExpired {
         require(state == SaleState.LITIGIOUS_MODE, "Sale should be refused");
 
-        // Cannot Pass String array
-        // TODO CREATE BLOOM FILTER AND CHECK WORDS
+        uint bloomFilter = 0;
+        for (uint i = 0; i < words.length; i++) {
+            for (uint j = 1; j <= numberOfHashes; j++) {
+                uint256 bitPos = uint256(keccak256(abi.encodePacked(words[i], j))) % 256;
+                uint256 mask = 1 << bitPos;
+                bloomFilter |= mask;
+            }
+        }
 
         state = SaleState.SALE_LOCKED;
 
-        uint factorAmount = deposits[seller].mul(factor).div(100);
-        uint penaltyAmount = deposits[seller].sub(factorAmount);
-        withdraws[seller] = deposits[buyer].add(penaltyAmount);
+        if (bloomFilter == bloomFilterSeller) {
+            uint factorAmount = deposits[seller].mul(factor).div(100);
+            uint penaltyAmount = deposits[seller].sub(factorAmount);
+            withdraws[seller] = deposits[buyer].add(penaltyAmount);
+        } else {
+            withdraws[buyer] = deposits[buyer].add(deposits[seller]);
+        }
 
-        emit SellerSentWords();
+        emit LitigiousResult(bloomFilter == bloomFilterSeller, bloomFilterSeller, bloomFilter);
     }
 
     function calculateRefund() public onlyParticipant onlyIfExpired {
+        emit Refund(2);
         if (state == SaleState.BUYER_START_SALE ||
-            state == SaleState.BUYER_CONFIRM_SALE ||
-            state >= SaleState.SALE_ACCEPTED)
+        state == SaleState.BUYER_CONFIRM_SALE ||
+        state >= SaleState.SALE_ACCEPTED)
             return;
 
         SaleState previousState = state;
@@ -196,10 +212,13 @@ contract WordSale {
         } else if (previousState == SaleState.LITIGIOUS_MODE) {
             withdraws[buyer] = deposits[buyer].add(deposits[seller]);
         }
+
+        emit Refund(withdraws[buyer]);
     }
 
     function withdraw() external onlyParticipant {
         if (now >= endTimeState) calculateRefund();
+        emit Refund(123);
 
         if (withdraws[msg.sender] <= 0) {
             revert("No ether to transfer");
