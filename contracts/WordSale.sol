@@ -194,7 +194,6 @@ contract WordSale {
     }
 
     function calculateRefund() public onlyParticipant onlyIfExpired {
-        emit Refund(2);
         if (state == SaleState.BUYER_START_SALE ||
         state == SaleState.BUYER_CONFIRM_SALE ||
         state >= SaleState.SALE_ACCEPTED)
@@ -218,7 +217,6 @@ contract WordSale {
 
     function withdraw() external onlyParticipant {
         if (now >= endTimeState) calculateRefund();
-        emit Refund(123);
 
         if (withdraws[msg.sender] <= 0) {
             revert("No ether to transfer");
