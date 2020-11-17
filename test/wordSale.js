@@ -766,7 +766,8 @@ contract('WordSale', ([buyer, seller, userNotAuthorized]) => {
     SALE_STATE.BUYER_CONFIRM_SALE.should.eq.BN(await this.contract.state());
   });
 
-  it('should let seller withdraw his amount when he send the correct words in phase LITIGIOUS_MODE', async function () {
+  it('should let seller withdraw his amount when he send the correct words in phase LITIGIOUS_MODE', async function ()
+  {
     await this.contract.commitCollateral({
       from: buyer,
       value: COLLATERAL

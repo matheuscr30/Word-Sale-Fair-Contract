@@ -182,7 +182,7 @@ contract WordSale {
 
         state = SaleState.SALE_LOCKED;
 
-        if (bloomFilter == bloomFilterSeller) {
+        if ((bloomFilter & bloomFilterSeller) == bloomFilter) {
             uint factorAmount = deposits[seller].mul(factor).div(100);
             uint penaltyAmount = deposits[seller].sub(factorAmount);
             withdraws[seller] = deposits[buyer].add(penaltyAmount);
@@ -195,8 +195,8 @@ contract WordSale {
 
     function calculateRefund() public onlyParticipant onlyIfExpired {
         if (state == SaleState.BUYER_START_SALE ||
-        state == SaleState.BUYER_CONFIRM_SALE ||
-        state >= SaleState.SALE_ACCEPTED)
+            state == SaleState.BUYER_CONFIRM_SALE ||
+            state >= SaleState.SALE_ACCEPTED)
             return;
 
         SaleState previousState = state;
@@ -233,3 +233,4 @@ contract WordSale {
         revert("Cannot use fallback function");
     }
 }
+
